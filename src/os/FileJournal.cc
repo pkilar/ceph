@@ -1948,6 +1948,7 @@ void FileJournal::get_header(
   off64_t next_pos = pos;
   bufferlist bl;
   uint64_t seq = 0;
+  dout(2) << __FUNCTION__ << dendl;
   while (1) {
     bl.clear();
     pos = next_pos;
@@ -1973,6 +1974,7 @@ void FileJournal::corrupt(
   int wfd,
   off64_t corrupt_at)
 {
+  dout(2) << __FUNCTION__ << dendl;
   if (corrupt_at >= header.max_size)
     corrupt_at = corrupt_at + get_top() - header.max_size;
 
@@ -1995,6 +1997,7 @@ void FileJournal::corrupt_payload(
   int wfd,
   uint64_t seq)
 {
+  dout(2) << __FUNCTION__ << dendl;
   off64_t pos = 0;
   entry_header_t h;
   get_header(seq, &pos, &h);
@@ -2008,6 +2011,7 @@ void FileJournal::corrupt_footer_magic(
   int wfd,
   uint64_t seq)
 {
+  dout(2) << __FUNCTION__ << dendl;
   off64_t pos = 0;
   entry_header_t h;
   get_header(seq, &pos, &h);
@@ -2023,6 +2027,7 @@ void FileJournal::corrupt_header_magic(
   int wfd,
   uint64_t seq)
 {
+  dout(2) << __FUNCTION__ << dendl;
   off64_t pos = 0;
   entry_header_t h;
   get_header(seq, &pos, &h);
