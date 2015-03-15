@@ -17,7 +17,7 @@
 # include <cryptopp/modes.h>
 # include <cryptopp/aes.h>
 # include <cryptopp/filters.h>
-#elif USE_NSS
+#elif defined(USE_NSS)
 # include <nspr.h>
 # include <nss.h>
 # include <pk11pub.h>
@@ -91,7 +91,7 @@ void CryptoNone::decrypt(const bufferptr& secret, const bufferlist& in,
 #ifdef USE_CRYPTOPP
 # define AES_KEY_LEN     ((size_t)CryptoPP::AES::DEFAULT_KEYLENGTH)
 # define AES_BLOCK_LEN   ((size_t)CryptoPP::AES::BLOCKSIZE)
-#elif USE_NSS
+#elif defined(USE_NSS)
 // when we say AES, we mean AES-128
 # define AES_KEY_LEN	16
 # define AES_BLOCK_LEN   16
@@ -267,7 +267,7 @@ void CryptoAES::encrypt(const bufferptr& secret, const bufferlist& in, bufferlis
     }
     out.append((const char *)ciphertext.c_str(), ciphertext.length());
   }
-#elif USE_NSS
+#elif defined(USE_NSS)
   nss_aes_operation(CKA_ENCRYPT, secret, in, out, error);
 #else
 # error "No supported crypto implementation found."
@@ -302,7 +302,7 @@ void CryptoAES::decrypt(const bufferptr& secret, const bufferlist& in,
   }
 
   out.append((const char *)decryptedtext.c_str(), decryptedtext.length());
-#elif USE_NSS
+#elif defined(USE_NSS)
   nss_aes_operation(CKA_DECRYPT, secret, in, out, error);
 #else
 # error "No supported crypto implementation found."
