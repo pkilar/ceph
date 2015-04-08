@@ -67,7 +67,11 @@ namespace librbd {
       object_cacher(NULL), writeback_handler(NULL), object_set(NULL),
       readahead(),
       total_bytes_read(0), copyup_finisher(NULL),
-      object_map(*this)
+      object_map(*this),
+      thread_pool(cct, "librbd::thread_pool", cct->_conf->rbd_op_threads,
+                  "rbd_op_threads"),
+      aio_work_queue("librbd::aio_work_queue", cct->_conf->rbd_op_thread_timeout,
+                     &thread_pool)
   {
     md_ctx.dup(p);
     data_ctx.dup(p);
@@ -76,6 +80,8 @@ namespace librbd {
 
     memset(&header, 0, sizeof(header));
     memset(&layout, 0, sizeof(layout));
+
+    thread_pool.start();
   }
 
   ImageCtx::~ImageCtx() {
