@@ -135,6 +135,7 @@ Parameters
    striping: striping v2 support
    exclusive-lock: exclusive locking support
    object-map: object map support (requires exclusive-lock)
+   deep-flatten: snapshot flatten support
 
 .. option:: --image-shared
 
