@@ -909,6 +909,7 @@ void PGLog::read_log(ObjectStore *store, coll_t pg_coll,
   log.index();
 
   // build missing
+  dout(20) << "read_log test last_complete " << info.last_complete << " and last_update " << info.last_update << dendl;
   if (info.last_complete < info.last_update) {
     dout(10) << "read_log checking for missing items over interval (" << info.last_complete
 	     << "," << info.last_update << "]" << dendl;
