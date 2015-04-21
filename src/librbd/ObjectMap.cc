@@ -375,15 +375,23 @@ bool ObjectMap::aio_update(uint64_t start_object_no, uint64_t end_object_no,
        ++object_no) {
     if ((!current_state || m_object_map[object_no] == *current_state) &&
         m_object_map[object_no] != new_state) {
-      UpdateRequest *req = new UpdateRequest(m_image_ctx, m_snap_id,
-                                             start_object_no, end_object_no,
-                                             new_state, current_state,
-                                             on_finish);
-      req->send();
+      aio_update(m_snap_id, start_object_no, end_object_no, new_state,
+                 current_state, on_finish);
       return true;
     }
   }
   return false;
+}
+
+void ObjectMap::aio_update(uint64_t snap_id, uint64_t start_object_no,
+                           uint64_t end_object_no, uint8_t new_state,
+                           const boost::optional<uint8_t> &current_state,
+                           Context *on_finish) {
+  UpdateRequest *req = new UpdateRequest(m_image_ctx, snap_id,
+                                         start_object_no, end_object_no,
+                                         new_state, current_state,
+                                         on_finish);
+  req->send();
 }
 
 void ObjectMap::invalidate(uint64_t snap_id) {
@@ -520,31 +528,36 @@ void ObjectMap::ResizeRequest::finish(ObjectMap *object_map) {
 }
 
 void ObjectMap::UpdateRequest::send() {
-  assert(m_image_ctx.object_map_lock.is_wlocked());
   CephContext *cct = m_image_ctx.cct;
 
   // safe to update in-memory state first without handling rollback since any
   // failures will invalidate the object map
-  ldout(cct, 20) << &m_image_ctx << " updating object map: ["
+  ldout(cct, 20) << &m_image_ctx << " updating object map"
+                 << (m_snap_id != CEPH_NOSNAP ?
+                       " snap " + stringify(m_snap_id) : std::string())
+                 << ": ["
 		 << m_start_object_no << "," << m_end_object_no << ") = "
 		 << (m_current_state ?
 		       stringify(static_cast<uint32_t>(*m_current_state)) : "")
 		 << "->" << static_cast<uint32_t>(m_new_state)
 		 << dendl;
-  ObjectMap& object_map = m_image_ctx.object_map;
-  for (uint64_t object_no = m_start_object_no;
-       object_no < MIN(m_end_object_no, object_map.m_object_map.size());
-       ++object_no) {
-    if (!m_current_state ||
-	object_map.m_object_map[object_no] == *m_current_state) {
-      object_map.m_object_map[object_no] = m_new_state;
-    }
-  }
 
   librados::ObjectWriteOperation op;
   if (m_snap_id == CEPH_NOSNAP) {
+    assert(m_image_ctx.object_map_lock.is_wlocked());
+    ObjectMap& object_map = m_image_ctx.object_map;
+    for (uint64_t object_no = m_start_object_no;
+         object_no < MIN(m_end_object_no, object_map.m_object_map.size());
+         ++object_no) {
+      if (!m_current_state ||
+	  object_map.m_object_map[object_no] == *m_current_state) {
+        object_map.m_object_map[object_no] = m_new_state;
+      }
+    }
+
     rados::cls::lock::assert_locked(&op, RBD_LOCK_NAME, LOCK_EXCLUSIVE, "", "");
   }
+
   cls_client::object_map_update(&op, m_start_object_no, m_end_object_no,
 				m_new_state, m_current_state);
 
