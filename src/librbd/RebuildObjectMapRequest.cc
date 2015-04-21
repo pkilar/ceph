@@ -268,7 +268,7 @@ void RebuildObjectMapRequest::send_verify_objects() {
     boost::lambda::bind(boost::lambda::new_ptr<C_VerifyObject>(),
       boost::lambda::_1, &m_image_ctx, boost::lambda::_2));
   AsyncObjectThrottle *throttle = new AsyncObjectThrottle(
-    *this, context_factory, create_callback_context(), m_prog_ctx, 0,
+    *this, context_factory, create_callback_context(), &m_prog_ctx, 0,
     num_objects);
   throttle->start_ops(cct->_conf->rbd_concurrent_management_ops);
 }
