@@ -1628,8 +1628,9 @@ int get_pg_metadata(ObjectStore *store, bufferlist &bl, metadata_section &ms,
   bufferlist::iterator ebliter = bl.begin();
   ms.decode(ebliter);
 
-#if DIAGNOSTIC
+//#if DIAGNOSTIC
   Formatter *formatter = new JSONFormatter(true);
+#if DIAGNOSTIC
   cout << "struct_v " << (int)ms.struct_ver << std::endl;
   cout << "map epoch " << ms.map_epoch << std::endl;
 
@@ -1658,6 +1659,19 @@ int get_pg_metadata(ObjectStore *store, bufferlist &bl, metadata_section &ms,
   formatter->flush(cout);
   cout << std::endl;
 #endif
+
+  formatter->open_array_section("divergent_priors");
+  for (map<eversion_t, hobject_t>::iterator it = ms.divergent_priors.begin();
+       it != ms.divergent_priors.end(); ++ it) {
+      formatter->open_object_section("item");
+      formatter->dump_stream("eversion") << it->first;
+      formatter->dump_stream("hobject") << it->second;
+      formatter->close_section();
+  }
+  formatter->close_section();
+  formatter->flush(cout);
+  cout << std::endl;
+//#endif
 
   if (ms.map_epoch > sb.current_epoch) {
     cerr << "ERROR: Export map_epoch " << ms.map_epoch << " > osd epoch " << sb.current_epoch << std::endl;
