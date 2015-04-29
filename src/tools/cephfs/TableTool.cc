@@ -351,11 +351,18 @@ public:
     table_inst.encode_header(&header_bl);
 
     // Compose a transaction to clear and write header
-    librados::ObjectWriteOperation op;
-    op.omap_clear();
-    op.omap_set_header(header_bl);
-    
-    return io->operate(object_name, &op);
+    librados::ObjectWriteOperation clear_op;
+    clear_op.omap_clear();
+    int r = io->operate(object_name, &clear_op); 
+    if (r == -ENOENT) {
+      // Pass: if object doesn't exist then no need to omap_clear it
+    } else if (r < 0) {
+      return r;
+    }
+
+    librados::ObjectWriteOperation header_op;
+    header_op.omap_set_header(header_bl);
+    return io->operate(object_name, &header_op); 
   }
 };
 
