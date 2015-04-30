@@ -2818,7 +2818,6 @@ reprotect_and_return_err:
     }
 
     ictx->aio_work_queue.drain();
-    ictx->thread_pool.stop();
 
     ictx->cancel_async_requests();
     ictx->readahead.wait_for_pending();
@@ -2827,6 +2826,9 @@ reprotect_and_return_err:
     } else {
       flush(ictx);
     }
+
+    ictx->aio_work_queue.drain();
+    ictx->thread_pool.stop();
 
     if (ictx->copyup_finisher != NULL) {
       ictx->copyup_finisher->wait_for_empty();
