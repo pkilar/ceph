@@ -215,12 +215,12 @@ namespace librbd {
         // If read entire object from parent success and CoR is possible, kick
         // off a asynchronous copyup. This approach minimizes the latency
         // impact.
+        RWLock::RLocker snap_locker(m_ictx->snap_lock);
+        RWLock::RLocker parent_locker(m_ictx->parent_lock);
         Mutex::Locker copyup_locker(m_ictx->copyup_list_lock);
         map<uint64_t, CopyupRequest*>::iterator it =
           m_ictx->copyup_list.find(m_object_no);
         if (it == m_ictx->copyup_list.end()) {
-          RWLock::RLocker snap_locker(m_ictx->snap_lock);
-          RWLock::RLocker parent_locker(m_ictx->parent_lock);
           if (compute_parent_extents()) {
             // create and kick off a CopyupRequest
             CopyupRequest *new_req = new CopyupRequest(m_ictx, m_oid,
