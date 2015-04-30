@@ -142,12 +142,14 @@ ostream& PGLog::IndexedLog::print(ostream& out) const
 
 void PGLog::reset_backfill()
 {
+  dout(1) << __func__ << dendl;
   missing.clear();
   divergent_priors.clear();
   dirty_divergent_priors = true;
 }
 
 void PGLog::clear() {
+  dout(1) << __func__ << dendl;
   divergent_priors.clear();
   missing.clear();
   log.clear();
@@ -525,6 +527,7 @@ void PGLog::rewind_divergent_log(ObjectStore::Transaction& t, eversion_t newhead
     add_divergent_prior(
       i->first,
       i->second);
+    dout(1) << __func__ << ": add_divergent_prior(" << i->first << ", " << i->second << ")" << dendl;
   }
 
   if (info.last_update < log.can_rollback_to)
@@ -679,6 +682,7 @@ void PGLog::merge_log(ObjectStore::Transaction& t,
       add_divergent_prior(
 	i->first,
 	i->second);
+      dout(1) << __func__ << ": add_divergent_prior(" << i->first << ", " << i->second << ")" << dendl;
     }
 
     // We cannot rollback into the new log entries
