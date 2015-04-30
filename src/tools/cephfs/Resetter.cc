@@ -22,6 +22,7 @@
 
 #include "Resetter.h"
 
+#define dout_subsys ceph_subsys_mds
 
 void Resetter::reset(int rank)
 {
@@ -34,6 +35,13 @@ void Resetter::reset(int rank)
   int jp_load_result = jp.load(objecter);
   if (jp_load_result != 0) {
     std::cerr << "Error loading journal: " << cpp_strerror(jp_load_result) << std::endl;
+    std::cerr << "Falling back to hard reset..." << std::endl;
+    r = reset_hard(rank);
+    if (r != 0) {
+      std::cerr << "Hard reset failed: " << cpp_strerror(r) << std::endl;
+    } else {
+      std::cerr << "Hard reset successful." << std::endl;
+    }
     return;
   }
 
@@ -55,6 +63,13 @@ void Resetter::reset(int rank)
     if (r == -ENOENT) {
       cerr << "journal does not exist on-disk. Did you set a bad rank?"
 	   << std::endl;
+      std::cerr << "Falling back to hard reset..." << std::endl;
+      r = reset_hard(rank);
+      if (r != 0) {
+        std::cerr << "Hard reset failed: " << cpp_strerror(r) << std::endl;
+      } else {
+        std::cerr << "Hard reset successful." << std::endl;
+      }
       return;
     } else {
       cerr << "got error " << r << "from Journaler, failling" << std::endl;
@@ -90,23 +105,80 @@ void Resetter::reset(int rank)
   lock.Lock();
   assert(r == 0);
 
+  r = _write_reset_event(&journaler);
+  assert(r == 0);
+
+  lock.Unlock();
+
+  cout << "done" << std::endl;
+}
+
+int Resetter::reset_hard(int rank)
+{
+  JournalPointer jp(rank, mdsmap->get_metadata_pool());
+  jp.front = rank + MDS_INO_LOG_OFFSET;
+  jp.back = 0;
+  int r = jp.save(objecter);
+  if (r != 0) {
+    derr << "Error writing journal pointer: " << cpp_strerror(r) << dendl;
+    return r;
+  }
+
+  Journaler journaler(jp.front,
+    mdsmap->get_metadata_pool(),
+    CEPH_FS_ONDISK_MAGIC,
+    objecter, 0, 0, &timer, &finisher);
+  journaler.set_writeable();
+
+  // FIXME: avoid duplicating this logic from ceph-mds, move it up into
+  // a static MDLog member?
+  ceph_file_layout default_log_layout = g_default_file_layout;
+  default_log_layout.fl_pg_pool = mdsmap->get_metadata_pool();
+  if (g_conf->mds_log_segment_size > 0) {
+    default_log_layout.fl_object_size = g_conf->mds_log_segment_size;
+    default_log_layout.fl_stripe_unit = g_conf->mds_log_segment_size;
+  }
+  journaler.create(&default_log_layout, g_conf->mds_journal_format);
+
+  C_SaferCond cond;
+  {
+    Mutex::Locker l(lock);
+    journaler.write_head(&cond);
+  }
+  r = cond.wait();
+  if (r != 0) {
+    derr << "Error writing journal header: " << cpp_strerror(r) << dendl;
+    return r;
+  }
+
+  {
+    Mutex::Locker l(lock);
+    r = _write_reset_event(&journaler);
+  }
+  if (r != 0) {
+    derr << "Error writing EResetJournal: " << cpp_strerror(r) << dendl;
+    return r;
+  }
+
+  dout(4) << "Successfully wrote new journal pointer and header for rank "
+    << rank << dendl;
+  return 0;
+}
+
+int Resetter::_write_reset_event(Journaler *journaler)
+{
+  assert(journaler != NULL);
+
   LogEvent *le = new EResetJournal;
 
   bufferlist bl;
   le->encode_with_header(bl);
   
   cout << "writing EResetJournal entry" << std::endl;
-  journaler.append_entry(bl);
-  journaler.flush(new C_SafeCond(&mylock, &cond, &done,&r));
+  C_SaferCond cond;
+  journaler->append_entry(bl);
+  journaler->flush(&cond);
 
-  lock.Unlock();
-
-  mylock.Lock();
-  while (!done)
-    cond.Wait(mylock);
-  mylock.Unlock();
-
-  assert(r == 0);
-
-  cout << "done" << std::endl;
+  return cond.wait();
 }
+
