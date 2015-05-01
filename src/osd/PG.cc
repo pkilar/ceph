@@ -846,7 +846,7 @@ void PG::build_prior(std::auto_ptr<PriorSet> &prior_set)
   set_probe_targets(prior_set->probe);
 }
 
-void PG::clear_primary_state()
+void PG::clear_primary_state(bool flush)
 {
   dout(10) << "clear_primary_state" << dendl;
 
@@ -872,6 +872,13 @@ void PG::clear_primary_state()
 
   missing_loc.clear();
 
+  // Write pg_log information to disk if flush (used on shutdown)
+  if (flush) {
+    ObjectStore::Transaction *t = new ObjectStore::Transaction;
+    write_if_dirty(*t);
+    int tr = osd->store->queue_transaction_and_cleanup(osr.get(), t);
+    assert(tr == 0);
+  }
   pg_log.reset_recovery_pointers();
 
   scrubber.reserved_peers.clear();

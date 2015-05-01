@@ -770,7 +770,7 @@ protected:
   void clear_publish_stats();
 
 public:
-  void clear_primary_state();
+  void clear_primary_state(bool flush = false);
 
  public:
   bool is_actingbackfill(pg_shard_t osd) const {
