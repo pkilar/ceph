@@ -4558,6 +4558,10 @@ int ReplicatedPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
 	string aname;
 	bp.copy(op.xattr.name_len, aname);
 	tracepoint(osd, do_osd_op_pre_rmxattr, soid.oid.name.c_str(), soid.snap.val, aname.c_str());
+	if (!obs.exists || oi.is_whiteout()) {
+	  result = -ENOENT;
+	  break;
+	}
 	string name = "_" + aname;
 	if (pool.info.require_rollback()) {
 	  map<string, boost::optional<bufferlist> > to_set;
@@ -5449,8 +5453,6 @@ void ReplicatedPG::make_writeable(OpContext *ctx)
     snap_oi->prior_version = ctx->obs->oi.version;
     snap_oi->copy_user_bits(ctx->obs->oi);
     snap_oi->snaps = snaps;
-    if (was_dirty)
-      snap_oi->set_flag(object_info_t::FLAG_DIRTY);
 
     // prepend transaction to op_t
     PGBackend::PGTransaction *t = pgbackend->get_transaction();
@@ -5460,11 +5462,9 @@ void ReplicatedPG::make_writeable(OpContext *ctx)
     ctx->op_t = t;
     
     ctx->delta_stats.num_objects++;
-    if (snap_oi->is_dirty())
+    if (snap_oi->is_dirty()) {
       ctx->delta_stats.num_objects_dirty++;
-    if (snap_oi->is_whiteout()) {
-      dout(20) << __func__ << " cloning whiteout on " << soid << " to " << coid << dendl;
-      ctx->delta_stats.num_whiteouts++;
+      osd->logger->inc(l_osd_tier_dirty);
     }
     if (snap_oi->is_omap())
       ctx->delta_stats.num_objects_omap++;
@@ -6565,6 +6565,35 @@ void ReplicatedPG::finish_promote(int r, CopyResults *results,
     return;
   }
 
+  if (r != -ENOENT && soid.is_snap()) {
+    if (results->snaps.empty()) {
+      // we must have read "snap" content from the head object in
+      // the base pool.  use snap_seq to construct what snaps should
+      // be for this clone (what is was before we evicted the clean
+      // clone from this pool, and what it will be when we flush and
+      // the clone eventually happens in the base pool).
+      SnapSet& snapset = obc->ssc->snapset;
+      vector<snapid_t>::iterator p = snapset.snaps.begin();
+      while (p != snapset.snaps.end() && *p > soid.snap)
+	++p;
+      while (p != snapset.snaps.end() && *p > results->snap_seq) {
+	results->snaps.push_back(*p);
+	++p;
+      }
+    }
+
+    dout(20) << __func__ << " snaps " << results->snaps << dendl;
+    filter_snapc(results->snaps);
+
+    dout(20) << __func__ << " filtered snaps " << results->snaps << dendl;
+    if (results->snaps.empty()) {
+      dout(20) << __func__
+	       << " snaps are empty, clone is invalid,"
+	       << " setting r to ENOENT" << dendl;
+      r = -ENOENT;
+    }
+  }
+
   if (r == -ENOENT && results->started_temp_obj) {
     dout(10) << __func__ << " abort; will clean up partial work" << dendl;
     ObjectContextRef tempobc = get_object_context(results->temp_oid, true);
@@ -6669,25 +6698,7 @@ void ReplicatedPG::finish_promote(int r, CopyResults *results,
     tctx->new_obs.oi.user_version = results->user_version;
 
     if (soid.snap != CEPH_NOSNAP) {
-      if (!results->snaps.empty()) {
-	tctx->new_obs.oi.snaps = results->snaps;
-      } else {
-	// we must have read "snap" content from the head object in
-	// the base pool.  use snap_seq to construct what snaps should
-	// be for this clone (what is was before we evicted the clean
-	// clone from this pool, and what it will be when we flush and
-	// the clone eventually happens in the base pool).
-	SnapSet& snapset = obc->ssc->snapset;
-	vector<snapid_t>::iterator p = snapset.snaps.begin();
-	while (p != snapset.snaps.end() && *p > soid.snap)
-	  ++p;
-	assert(p != snapset.snaps.end());
-	do {
-	  tctx->new_obs.oi.snaps.push_back(*p);
-	  ++p;
-	} while (p != snapset.snaps.end() && *p > results->snap_seq);
-      }
-      dout(20) << __func__ << " snaps " << tctx->new_obs.oi.snaps << dendl;
+      tctx->new_obs.oi.snaps = results->snaps;
       assert(!tctx->new_obs.oi.snaps.empty());
       assert(obc->ssc->snapset.clone_size.count(soid.snap));
       assert(obc->ssc->snapset.clone_size[soid.snap] ==
@@ -11279,26 +11290,6 @@ void ReplicatedPG::_scrub(
 
     dout(20) << mode << "  " << soid << " " << oi << dendl;
 
-    if (pool.info.is_replicated() &&
-	(get_min_peer_features() & CEPH_FEATURE_OSD_OBJECT_DIGEST)) {
-      if (oi.is_data_digest() && p->second.digest_present &&
-	  oi.data_digest != p->second.digest) {
-	osd->clog->error() << mode << " " << info.pgid << " " << soid
-			   << " on disk data digest 0x" << std::hex
-			   << p->second.digest << " != 0x"
-			   << oi.data_digest << std::dec;
-	++scrubber.deep_errors;
-      }
-      if (oi.is_omap_digest() && p->second.omap_digest_present &&
-	  oi.omap_digest != p->second.omap_digest) {
-	osd->clog->error() << mode << " " << info.pgid << " " << soid
-			   << " on disk omap digest 0x" << std::hex
-			   << p->second.omap_digest << " != 0x"
-			   << oi.omap_digest << std::dec;
-	++scrubber.deep_errors;
-      }
-    }
-
     if (soid.is_snap()) {
       stat.num_bytes += snapset.get_clone_bytes(soid.snap);
     } else {
@@ -11410,27 +11401,26 @@ void ReplicatedPG::_scrub(
     ++scrubber.shallow_errors;
   }
 
-  if (scrubber.shallow_errors == 0) {
-    for (map<hobject_t,pair<uint32_t,uint32_t> >::const_iterator p =
-	   missing_digest.begin();
-	 p != missing_digest.end();
-	 ++p) {
-      if (p->first.is_snapdir())
-	continue;
-      dout(10) << __func__ << " recording digests for " << p->first << dendl;
-      ObjectContextRef obc = get_object_context(p->first, false);
-      assert(obc);
-      RepGather *repop = simple_repop_create(obc);
-      OpContext *ctx = repop->ctx;
-      ctx->at_version = get_next_version();
-      ctx->mtime = utime_t();      // do not update mtime
-      ctx->new_obs.oi.set_data_digest(p->second.first);
-      ctx->new_obs.oi.set_omap_digest(p->second.second);
-      finish_ctx(ctx, pg_log_entry_t::MODIFY, true, true);
-      ctx->on_finish = new C_ScrubDigestUpdated(this);
-      simple_repop_submit(repop);
-      ++scrubber.num_digest_updates_pending;
-    }
+  for (map<hobject_t,pair<uint32_t,uint32_t> >::const_iterator p =
+	 missing_digest.begin();
+       p != missing_digest.end();
+       ++p) {
+    if (p->first.is_snapdir())
+      continue;
+    dout(10) << __func__ << " recording digests for " << p->first << dendl;
+    ObjectContextRef obc = get_object_context(p->first, false);
+    assert(obc);
+    RepGather *repop = simple_repop_create(obc);
+    OpContext *ctx = repop->ctx;
+    ctx->at_version = get_next_version();
+    ctx->mtime = utime_t();      // do not update mtime
+    ctx->new_obs.oi.set_data_digest(p->second.first);
+    ctx->new_obs.oi.set_omap_digest(p->second.second);
+    ctx->mtime = utime_t();      // do not update mtime
+    finish_ctx(ctx, pg_log_entry_t::MODIFY, true, true);
+    ctx->on_finish = new C_ScrubDigestUpdated(this);
+    simple_repop_submit(repop);
+    ++scrubber.num_digest_updates_pending;
   }
   
   dout(10) << "_scrub (" << mode << ") finish" << dendl;

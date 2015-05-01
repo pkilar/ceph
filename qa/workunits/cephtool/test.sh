@@ -232,10 +232,7 @@ function test_mon_injectargs_SI()
   expect_config_value "mon.a" "mon_pg_warn_min_objects" 10240
   ceph tell mon.a injectargs '--mon_pg_warn_min_objects 1G'
   expect_config_value "mon.a" "mon_pg_warn_min_objects" 1073741824
-  # < /dev/null accounts for the fact that ceph will go in interactive mode
-  # because injectargs is discarded (actually saved for the benefit of 
-  # a tell command that never comes)
-  expect_false ceph injectargs mon.a '--mon_pg_warn_min_objects 10F' < /dev/null 2> /dev/null
+  expect_false ceph tell mon.a injectargs '--mon_pg_warn_min_objects 10F'
   $SUDO ceph daemon mon.a config set mon_pg_warn_min_objects $initial_value
 }
 
@@ -316,6 +313,16 @@ function test_tiering()
 
   ceph osd pool delete cache cache --yes-i-really-really-mean-it
   ceph osd pool delete cache2 cache2 --yes-i-really-really-mean-it
+
+  # make sure we can't clobber snapshot state
+  ceph osd pool create snap_base 2
+  ceph osd pool create snap_cache 2
+  rbd -p snap_cache create foo --size 10
+  rbd -p snap_cache snap create foo --snap snap1
+  rbd -p snap_cache snap rm foo --snap snap1
+  expect_false ceph osd tier add snap_base snap_cache --force-nonempty
+  ceph osd pool delete snap_base snap_base --yes-i-really-really-mean-it
+  ceph osd pool delete snap_cache snap_cache --yes-i-really-really-mean-it
 
   # convenient add-cache command
   ceph osd pool create cache3 2
@@ -441,6 +448,15 @@ function test_auth()
   diff authfile authfile2
   rm authfile authfile2
   ceph auth del client.xx
+  expect_false ceph auth get client.xx
+
+  # (almost) interactive mode
+  echo -e 'auth add client.xx mon allow osd "allow *"\n' | ceph
+  ceph auth get client.xx
+  # script mode
+  echo 'auth del client.xx' | ceph
+  expect_false ceph auth get client.xx
+
   #
   # get / set auid
   #

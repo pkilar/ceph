@@ -41,7 +41,7 @@ struct ECSubWrite {
     osd_reqid_t reqid,
     hobject_t soid,
     const pg_stat_t &stats,
-    const ObjectStore::Transaction &t,
+    ObjectStore::Transaction *in_t,
     eversion_t at_version,
     eversion_t trim_to,
     eversion_t trim_rollback_to,
@@ -50,17 +50,39 @@ struct ECSubWrite {
     const set<hobject_t> &temp_added,
     const set<hobject_t> &temp_removed)
     : from(from), tid(tid), reqid(reqid),
-      soid(soid), stats(stats), t(t),
+      soid(soid), stats(stats),
       at_version(at_version),
       trim_to(trim_to), trim_rollback_to(trim_rollback_to),
       log_entries(log_entries),
       temp_added(temp_added),
       temp_removed(temp_removed),
-      updated_hit_set_history(updated_hit_set_history) {}
+      updated_hit_set_history(updated_hit_set_history) {
+    if (in_t)
+      t.swap(*in_t);
+  }
+  void claim(ECSubWrite &other) {
+    from = other.from;
+    tid = other.tid;
+    reqid = other.reqid;
+    soid = other.soid;
+    stats = other.stats;
+    t.swap(other.t);
+    at_version = other.at_version;
+    trim_to = other.trim_to;
+    trim_rollback_to = other.trim_rollback_to;
+    log_entries.swap(other.log_entries);
+    temp_added.swap(other.temp_added);
+    temp_removed.swap(other.temp_removed);
+    updated_hit_set_history = other.updated_hit_set_history;
+  }
   void encode(bufferlist &bl) const;
   void decode(bufferlist::iterator &bl);
   void dump(Formatter *f) const;
   static void generate_test_instances(list<ECSubWrite*>& o);
+private:
+  // no outside copying -- slow
+  ECSubWrite(ECSubWrite& other);
+  const ECSubWrite& operator=(const ECSubWrite& other);
 };
 WRITE_CLASS_ENCODER(ECSubWrite)
 
