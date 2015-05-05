@@ -1,0 +1,15 @@
+[Unit]
+Description=RADOS Gateway service for Ceph
+After=network-online.target local-fs.target
+Wants=network-online.target local-fs.target
+PartOf=ceph.target
+
+[Service]
+Type=forking
+PermissionsStartOnly=true
+Environment=CLUSTER=ceph
+ExecStartPre=/bin/chmod 777 /var/log/radosgw/ /run/ceph/
+ExecStart=/usr/bin/radosgw -n client.radosgw.gateway
+
+[Install]
+WantedBy=ceph.target

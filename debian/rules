@@ -2,6 +2,7 @@
 # -*- makefile -*-
 export DH_VERBOSE=1
 export DESTDIR=$(CURDIR)/debian/tmp
+export SYSTEMD=1
 
 ifneq (,$(filter parallel=%,$(DEB_BUILD_OPTIONS)))
   NUMJOBS = $(patsubst parallel=%,%,$(filter parallel=%,$(DEB_BUILD_OPTIONS)))
@@ -118,16 +119,37 @@ binary-arch: build install
 	dh_install -a --sourcedir=$(DESTDIR) --list-missing
 	dh_installlogrotate -a
 	dh_installinit -a --no-start
-	# dh_installinit is only set up to handle one upstart script
-	# per package, so do this ourselves
-	install -d -m0755 debian/ceph/etc/init
-	install -m0644 src/upstart/ceph*.conf debian/ceph/etc/init
-	install -d -m0755 debian/ceph-common/etc/init
-	install -m0644 src/upstart/rbdmap.conf debian/ceph-common/etc/init
-	install -d -m0755 debian/ceph-mds/etc/init
-	mv debian/ceph/etc/init/ceph-mds* debian/ceph-mds/etc/init
-	install -d -m0755 debian/radosgw/etc/init
-	install -m0644 src/upstart/radosgw*.conf debian/radosgw/etc/init
+ifeq ($(SYSTEMD),1)
+		install -d -m0755 debian/ceph/etc/init.d
+		install -d -m0755 debian/ceph/lib/systemd/system/ceph.target.wants
+		install -m0755 systemd/ceph debian/ceph/etc/init.d/
+		install -m0644 systemd/ceph.target debian/ceph/lib/systemd/system/
+		install -m0644 systemd/ceph-mon@.service debian/ceph/lib/systemd/system/
+		install -m0644 systemd/ceph-osd@.service debian/ceph/lib/systemd/system/
+
+		install -d -m0755 debian/ceph-common/lib/systemd/system/ceph.target.wants
+
+		install -d -m0755 debian/ceph-mds/etc/init.d
+		install -d -m0755 debian/ceph-mds/lib/systemd/system/ceph.target.wants
+		install -m0755 systemd/ceph debian/ceph-mds/etc/init.d/
+		install -m0644 systemd/ceph.target debian/ceph-mds/lib/systemd/system/
+		install -m0644 systemd/ceph-mds@.service debian/ceph-mds/lib/systemd/system/
+
+		install -d -m0755 debian/radosgw/lib/systemd/system/ceph.target.wants
+		install -m0644 systemd/ceph.target debian/radosgw/lib/systemd/system/
+		install -m0644 systemd/ceph-radosgw.service debian/radosgw/lib/systemd/system/
+else
+		# dh_installinit is only set up to handle one upstart script
+		# per package, so do this ourselves
+		install -d -m0755 debian/ceph/etc/init
+		install -m0644 src/upstart/ceph*.conf debian/ceph/etc/init
+		install -d -m0755 debian/ceph-common/etc/init
+		install -m0644 src/upstart/rbdmap.conf debian/ceph-common/etc/init
+		install -d -m0755 debian/ceph-mds/etc/init
+		mv debian/ceph/etc/init/ceph-mds* debian/ceph-mds/etc/init
+		install -d -m0755 debian/radosgw/etc/init
+		install -m0644 src/upstart/radosgw*.conf debian/radosgw/etc/init
+endif
 	dh_installman -a
 	dh_lintian -a
 	dh_link -a
